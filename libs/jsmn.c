@@ -440,7 +440,11 @@ char* get_json_value(const char* restrict key, const char* restrict json_data, u
                     free(tokens);
                     return NULL;
                 }
-                char* p = memccpy(value, json_data + tokens[i + 1].start, '\0', length);
+                const char* src = json_data + tokens[i + 1].start;
+		char* end = memchr(src, '\0', length);
+		size_t copy_len = end ? (end - src + 1) : length;
+		memcpy(value, src, copy_len);
+		char* p = value + copy_len;
                 if(!p) {
                     value[length] = '\0';
                     FURI_LOG_W(
