@@ -543,7 +543,12 @@ void setting_item_clicked(void* context, uint32_t index) {
         return;
     }
     // Initialize temp_buffer with existing string
-    char* p = memccpy(app->temp_buffer, furi_string_get_cstr(string), '\0', size);
+    const char* src = furi_string_get_cstr(string);
+    char* end = memchr(src, '\0', size);
+    size_t copy_len = end ? (end - src + 1) : size;
+    memcpy(app->temp_buffer, src, copy_len);
+    char* p = app->temp_buffer + copy_len;
+
     if(!p) {
         app->temp_buffer[size] = '\0';
         FURI_LOG_I(
@@ -713,7 +718,16 @@ void extract_payload(
         if(start) {
             start += strlen(beginning);
             if(end) {
-                char* p = memccpy(temp, start, '\0', end - start);
+                size_t len = end - start;
+		char* endptr = memchr(start, '\0', len);
+		size_t copy_len;
+		if(endptr) {
+    		    copy_len = (size_t)(endptr - start + 1);
+		} else {
+    		    copy_len = len;
+		}
+		memcpy(temp, start, copy_len);
+		char* p = temp + copy_len;
                 if(!p) {
                     temp[end - start] = '\0';
                     FURI_LOG_I(
