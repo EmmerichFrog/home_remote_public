@@ -7,6 +7,4 @@ The software offers a configuration screen to setup ssids and related data. A js
 
 The included fork of FlipperHTTP has increased buffer sizes to handle the payload. Supports putting the wifi devboard to sleep (needs a forked esp32 firmware).
 
-Needs to be compiled with a sdk with memccpy enabled.
-
 There is probably not much use to this app since it's custom to my setup but maybe it can be found useful by some people.
