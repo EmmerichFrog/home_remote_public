@@ -1,8 +1,13 @@
 #include "app.h"
-#include "alloc_free.h"
-#include "frame.h"
+#include "src/alloc_free.h"
+#include "libs/jsmn.h"
+#include <storage/storage.h>
 
-//static const char HA_AIDX[] = "aidx";
+const uint16_t polling_values[4] = {500U, 1000U, 5000U, 10000U};
+const char* polling_names[4] = {"500ms", "1s", "5s", "10s"};
+const char* ctrl_mode_names[3] = {"Wifi", "Sghz+BT Home", "Bt Serial"};
+const char* randomize_mac_names[2] = {"Off", "On"};
+
 static const char FRAME_URL_KEY[] = "frame_url";
 static const char FRAME_SSID_KEY[] = "frame_ssid";
 static const char FRAME_PASS_KEY[] = "frame_pass";
@@ -12,16 +17,14 @@ static const char HA_URL_CMD_KEY[] = "ha_url_cmd";
 static const char HA_SSID_KEY[] = "ha_ssid";
 static const char HA_PASS_KEY[] = "ha_pass";
 static const char HA_POLLING_KEY[] = "ha_polling";
+static const char HA_CTRL_MODE_KEY[] = "ha_ctrl";
+static const char RANDOMIZE_MAC_KEY[] = "bt_randomize_mac";
 static const char HA_TOKEN_KEY[] = "ha_token";
-
-const uint16_t polling_values[4] = {500U, 1000U, 5000U, 10000U};
-const char* polling_names[4] = {"500ms", "1s", "5s", "10s"};
 
 //This pin will be set to 1 to wake the board when the app is in use
 const GpioPin* const pin_wake = &gpio_ext_pa4;
 
 FlipperHTTP* fhttp;
-
 /**
  * @brief      Save path, ssid and password to file on change.
  * @param      app  The context
@@ -31,124 +34,42 @@ void save_settings(App* app) {
         FURI_LOG_I(TAG, "Saving json config...");
         ReqModel* frame_model = view_get_model(app->view_frame);
         ReqModel* ha_model = view_get_model(app->view_ha);
+
         Storage* storage = furi_record_open(RECORD_STORAGE);
         File* file = storage_file_alloc(storage);
 
-        FuriString* json = furi_string_alloc();
-        furi_string_set_str(json, "{");
-
-        char json_entry_fmt_s[] = "\n\t\"%s\": \"%s\"";
-        char json_entry_fmt_u[] = "\n\t\"%s\": \"%u\"";
-
-        char json_entry[256];
+        FuriJson* json = furi_json_alloc();
 
         // Frame Settings
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_s,
-            FRAME_URL_KEY,
-            furi_string_get_cstr(frame_model->url));
-        furi_string_cat_str(json, json_entry);
-        furi_string_cat_str(json, ",");
-        json_entry[0] = '\0';
-
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_s,
-            FRAME_SSID_KEY,
-            furi_string_get_cstr(app->frame_ssid));
-        furi_string_cat_str(json, json_entry);
-        furi_string_cat_str(json, ",");
-        json_entry[0] = '\0';
-
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_s,
-            FRAME_PASS_KEY,
-            furi_string_get_cstr(app->frame_pass));
-        furi_string_cat_str(json, json_entry);
-        furi_string_cat_str(json, ",");
-        json_entry[0] = '\0';
+        furi_json_add_entry(json, FRAME_URL_KEY, furi_string_get_cstr(frame_model->url));
+        furi_json_add_entry(json, FRAME_SSID_KEY, furi_string_get_cstr(app->frame_ssid));
+        furi_json_add_entry(json, FRAME_PASS_KEY, furi_string_get_cstr(app->frame_pass));
 
         // Home Assistant
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_s,
-            HA_URL_KEY,
-            furi_string_get_cstr(ha_model->url));
-        furi_string_cat_str(json, json_entry);
-        furi_string_cat_str(json, ",");
+        furi_json_add_entry(json, HA_URL_KEY, furi_string_get_cstr(ha_model->url));
+        furi_json_add_entry(json, HA_URL_CMD_KEY, furi_string_get_cstr(ha_model->url_cmd));
+        furi_json_add_entry(json, HA_SSID_KEY, furi_string_get_cstr(app->ha_ssid));
+        furi_json_add_entry(json, HA_PASS_KEY, furi_string_get_cstr(app->ha_pass));
+        furi_json_add_entry(json, HA_POLLING_KEY, (uint32_t)ha_model->polling_rate_index);
+        furi_json_add_entry(json, HA_CTRL_MODE_KEY, (uint32_t)ha_model->control_mode);
+        furi_json_add_entry(json, RANDOMIZE_MAC_KEY, (uint32_t)ha_model->ble->randomize_mac_enb);
 
-        json_entry[0] = '\0';
+        furi_json_add_entry(json, HA_TOKEN_KEY, furi_string_get_cstr(ha_model->token));
 
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_s,
-            HA_URL_CMD_KEY,
-            furi_string_get_cstr(ha_model->url_cmd));
-        furi_string_cat_str(json, json_entry);
-        furi_string_cat_str(json, ",");
-        json_entry[0] = '\0';
-
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_s,
-            HA_SSID_KEY,
-            furi_string_get_cstr(app->ha_ssid));
-        furi_string_cat_str(json, json_entry);
-        furi_string_cat_str(json, ",");
-        json_entry[0] = '\0';
-
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_s,
-            HA_PASS_KEY,
-            furi_string_get_cstr(app->ha_pass));
-        furi_string_cat_str(json, json_entry);
-        furi_string_cat_str(json, ",");
-        json_entry[0] = '\0';
-
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_u,
-            HA_POLLING_KEY,
-            ha_model->polling_rate_index);
-        furi_string_cat_str(json, json_entry);
-        furi_string_cat_str(json, ",");
-        json_entry[0] = '\0';
-
-        snprintf(
-            json_entry,
-            sizeof(json_entry),
-            json_entry_fmt_s,
-            HA_TOKEN_KEY,
-            furi_string_get_cstr(ha_model->token));
-        furi_string_cat_str(json, json_entry);
-        json_entry[0] = '\0';
-
-        furi_string_cat_str(json, "\n}");
-
-        if(storage_file_open(file, RR_CONF_PATH, FSAM_WRITE, FSOM_OPEN_ALWAYS)) {
+        size_t len_w = 0;
+        size_t len_req = strlen(json->to_text);
+        if(storage_file_open(file, HR_CONF_PATH, FSAM_WRITE, FSOM_OPEN_ALWAYS)) {
             storage_file_truncate(file);
-            storage_file_write(
-                file, furi_string_get_cstr(json), strlen(furi_string_get_cstr(json)));
+            len_w = storage_file_write(file, json->to_text, len_req);
         } else {
-            FURI_LOG_E(TAG, "Error opening %s for writing", RR_CONF_PATH);
+            FURI_LOG_E(TAG, "Error opening %s for writing", HR_CONF_PATH);
         }
         storage_file_close(file);
 
         storage_file_free(file);
-        furi_string_free(json);
+        furi_json_free(json);
         furi_record_close(RECORD_STORAGE);
-        FURI_LOG_I(TAG, "Saving data completed");
+        FURI_LOG_I(TAG, "Saving data completed, written %u bytes, buffer was %u", len_w, len_req);
         furi_check(furi_mutex_release(app->config_mutex) == FuriStatusOk);
     }
 }
@@ -164,20 +85,20 @@ void load_settings(App* app) {
     ReqModel* ha_model = view_get_model(app->view_ha);
 
     Storage* storage = furi_record_open(RECORD_STORAGE);
-    if(!storage_dir_exists(storage, RR_SETTINGS_FOLDER)) {
-        FURI_LOG_I(TAG, "Folder missing, creating %s", RR_SETTINGS_FOLDER);
-        storage_simply_mkdir(storage, RR_SETTINGS_FOLDER);
+    if(!storage_dir_exists(storage, HR_SETTINGS_FOLDER)) {
+        FURI_LOG_I(TAG, "Folder missing, creating %s", HR_SETTINGS_FOLDER);
+        storage_simply_mkdir(storage, HR_SETTINGS_FOLDER);
     }
     File* file = storage_file_alloc(storage);
-    size_t buf_size = 512;
+    size_t buf_size = 768;
     uint8_t* file_buffer = malloc(buf_size);
     FuriString* json = furi_string_alloc();
     uint16_t max_tokens = 128;
 
-    if(storage_file_open(file, RR_CONF_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
+    if(storage_file_open(file, HR_CONF_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
         storage_file_read(file, file_buffer, buf_size);
     } else {
-        FURI_LOG_E(TAG, "Failed to open config file %s", RR_CONF_PATH);
+        FURI_LOG_E(TAG, "Failed to open config file %s", HR_CONF_PATH);
     }
     storage_file_close(file);
 
@@ -198,6 +119,7 @@ void load_settings(App* app) {
     value = get_json_value(FRAME_SSID_KEY, furi_string_get_cstr(json), max_tokens);
     if(value) {
         furi_string_set_str(app->frame_ssid, value);
+        free(value);
     } else {
         FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", FRAME_SSID_KEY);
     }
@@ -205,6 +127,7 @@ void load_settings(App* app) {
     value = get_json_value(FRAME_PASS_KEY, furi_string_get_cstr(json), max_tokens);
     if(value) {
         furi_string_set_str(app->frame_pass, value);
+        free(value);
     } else {
         FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", FRAME_PASS_KEY);
     }
@@ -213,6 +136,7 @@ void load_settings(App* app) {
     value = get_json_value(HA_URL_KEY, furi_string_get_cstr(json), max_tokens);
     if(value) {
         furi_string_set_str(ha_model->url, value);
+        free(value);
     } else {
         FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", HA_URL_KEY);
     }
@@ -220,6 +144,7 @@ void load_settings(App* app) {
     value = get_json_value(HA_URL_CMD_KEY, furi_string_get_cstr(json), max_tokens);
     if(value) {
         furi_string_set_str(ha_model->url_cmd, value);
+        free(value);
     } else {
         FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", HA_URL_CMD_KEY);
     }
@@ -227,6 +152,7 @@ void load_settings(App* app) {
     value = get_json_value(HA_SSID_KEY, furi_string_get_cstr(json), max_tokens);
     if(value) {
         furi_string_set_str(app->ha_ssid, value);
+        free(value);
     } else {
         FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", HA_SSID_KEY);
     }
@@ -234,6 +160,7 @@ void load_settings(App* app) {
     value = get_json_value(HA_PASS_KEY, furi_string_get_cstr(json), max_tokens);
     if(value) {
         furi_string_set_str(app->ha_pass, value);
+        free(value);
     } else {
         FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", HA_PASS_KEY);
     }
@@ -242,14 +169,41 @@ void load_settings(App* app) {
     if(value) {
         ha_model->polling_rate_index = strtoul(value, NULL, 10);
         ha_model->polling_rate = polling_values[ha_model->polling_rate_index];
+        free(value);
     } else {
         FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", HA_POLLING_KEY);
+    }
+
+    value = get_json_value(HA_CTRL_MODE_KEY, furi_string_get_cstr(json), max_tokens);
+    if(value) {
+        ha_model->control_mode = strtoul(value, NULL, 10);
+        free(value);
+    } else {
+        FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", HA_POLLING_KEY);
+    }
+    value = get_json_value(RANDOMIZE_MAC_KEY, furi_string_get_cstr(json), max_tokens);
+    if(value) {
+        uint32_t index = strtoul(value, NULL, 10);
+        switch(index) {
+        case 0:
+            ha_model->ble->randomize_mac_enb = false;
+            break;
+        case 1:
+            ha_model->ble->randomize_mac_enb = true;
+            break;
+        default:
+            break;
+        }
+        free(value);
+    } else {
+        FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", RANDOMIZE_MAC_KEY);
     }
 
     value = get_json_value(HA_TOKEN_KEY, furi_string_get_cstr(json), max_tokens);
     if(value) {
         furi_string_set_str(ha_model->token, value);
         ha_model->token_lenght = furi_string_size(ha_model->token);
+        free(value);
     } else {
         FURI_LOG_E(TAG, "Error: Key [%s] not found while loading config.", FRAME_URL_KEY);
     }
@@ -262,28 +216,7 @@ void load_settings(App* app) {
 }
 
 /**
- * @brief      Short buzz the vibration
-*/
-void buzz_vibration() {
-    furi_hal_vibro_on(true);
-    furi_delay_ms(50);
-    furi_hal_vibro_on(false);
-}
-
-/**
- * @brief      Generate a random number bewteen min and max
- * @param      min  minimum value
- * @param      max  maximum value
- * @return     the random number
-*/
-int32_t random_limit(int32_t min, int32_t max) {
-    int32_t rnd = rand() % (max + 1 - min) + min;
-    return rnd;
-}
-
-/**
  * @brief      Check if sending a request is allowed
- * @param      context  the current context
  * @param      model  the current model
  * @return     true if it's allowed
 */
@@ -295,7 +228,6 @@ bool allow_cmd(ReqModel* model) {
 
 /**
  * @brief      Check if exiting the view is allowed
- * @param      context  the current context
  * @param      model  the current model
  * @return     true if it's allowed
 */
@@ -305,24 +237,9 @@ static bool allow_back(ReqModel* model) {
 }
 
 /**
- * @brief      Reverse an uint8_t array
- * @param      arr  pointer to the array to be reversed
- * @param      size  the array size
-*/
-void reverse_array_uint8(uint8_t* arr, size_t size) {
-    uint8_t temp[size];
-
-    for(size_t i = 0; i < size; i++)
-        temp[i] = arr[size - i - 1];
-
-    for(size_t i = 0; i < size; i++)
-        arr[i] = temp[i];
-}
-
-/**
  * @brief      Callback for exiting the application.
  * @details    This function is called when user press back button.  We return VIEW_NONE to
- *            indicate that we want to exit the application.
+ *             indicate that we want to exit the application.
  * @param      context  The context - unused
  * @return     next view id
 */
@@ -334,7 +251,7 @@ uint32_t navigation_exit_callback(void* context) {
 /**
  * @brief      Callback for returning to submenu.
  * @details    This function is called when user press back button.  We return ViewSubmenu to
- *            indicate that we want to navigate to the submenu.
+ *             indicate that we want to navigate to the submenu.
  * @param      context  The context - unused
  * @return     next view id
 */
@@ -346,7 +263,7 @@ uint32_t navigation_submenu_callback(void* context) {
 /**
  * @brief      Callback for returning to configure screen.
  * @details    This function is called when user press back button.  We return ViewConfigure to
- *            indicate that we want to navigate to the configure screen.
+ *             indicate that we want to navigate to the configure screen.
  * @param      context  The context - unused
  * @return     next view id
 */
@@ -376,6 +293,23 @@ void submenu_callback(void* context, uint32_t index) {
     case SubmenuIndexResp:
         view_dispatcher_switch_to_view(app->view_dispatcher, ViewResp);
         break;
+    case SubmenuIndexAbout:
+        uint32_t rnd = futils_random_limit(DUDUBUBU_FIRST, DUDUBUBU_LAST);
+        widget_reset(app->widget_about);
+
+        switch(rnd) {
+        case DUDUBUBU_BUTT:
+            widget_add_icon_element(app->widget_about, 19, 0, &I_dudububu_butt);
+            break;
+        case DUDUBUBU_HUG:
+            widget_add_icon_element(app->widget_about, 32, 0, &I_dudububu_hug);
+            break;
+        default:
+            break;
+        }
+
+        view_dispatcher_switch_to_view(app->view_dispatcher, ViewAbout);
+        break;
     default:
         break;
     }
@@ -385,13 +319,33 @@ void submenu_callback(void* context, uint32_t index) {
  * @brief      Function called when one of the VariableItem is updated.
  * @param      item  The pointer to the VariableItem object.
 */
-void polling_setting_changed(VariableItem* item) {
+void variable_item_setting_changed(VariableItem* item) {
     App* app = variable_item_get_context(item);
     ReqModel* ha_model = view_get_model(app->view_ha);
 
-    ha_model->polling_rate_index = variable_item_get_current_value_index(item);
-    variable_item_set_current_value_text(item, polling_names[ha_model->polling_rate_index]);
-    ha_model->polling_rate = polling_values[ha_model->polling_rate_index];
+    uint8_t index = variable_item_list_get_selected_item_index(app->variable_item_list_config);
+    FURI_LOG_I(TAG, "Index %u", index);
+    switch(index) {
+    case ConfigVariableItemPolling:
+        ha_model->polling_rate_index = variable_item_get_current_value_index(item);
+        variable_item_set_current_value_text(item, polling_names[ha_model->polling_rate_index]);
+        ha_model->polling_rate = polling_values[ha_model->polling_rate_index];
+        break;
+    case ConfigVariableItemCtrlMode:
+        ha_model->control_mode = variable_item_get_current_value_index(item);
+        variable_item_set_current_value_text(item, ctrl_mode_names[ha_model->control_mode]);
+        break;
+
+    case ConfigVariableItemRandomizeMac:
+        ha_model->ble->randomize_mac_enb = variable_item_get_current_value_index(item);
+        variable_item_set_current_value_text(
+            item, randomize_mac_names[variable_item_get_current_value_index(item)]);
+        break;
+
+    default:
+        FURI_LOG_E(TAG, "Unhandled index [%u] in variable_item_setting_changed.", index);
+        return;
+    }
     save_settings(app);
 }
 
@@ -448,7 +402,7 @@ void conf_text_updated(void* context) {
         upd_flag = 2;
         break;
     default:
-        FURI_LOG_W(TAG, "Unhandled index [%u] in conf_text_updated.", app->config_index);
+        FURI_LOG_E(TAG, "Unhandled index [%u] in conf_text_updated.", app->config_index);
         return;
     }
 
@@ -543,13 +497,13 @@ void setting_item_clicked(void* context, uint32_t index) {
         return;
     }
     // Initialize temp_buffer with existing string
-    char* p = memccpy(app->temp_buffer, furi_string_get_cstr(string), '\0', size);
-    if(!p) {
-        app->temp_buffer[size] = '\0';
-        FURI_LOG_I(
-            TAG,
-            "[settings_item_clicked]: Manually temrinating string in [temp_buffer], check sizes");
-    }
+    futils_copy_str(
+        app->temp_buffer,
+        furi_string_get_cstr(string),
+        size,
+        "setting_items_clicked",
+        "app->temp_buffer");
+
     // Configure the text input
     uart_text_input_set_result_callback(
         text_input, conf_text_updated, app, app->temp_buffer, size, false);
@@ -570,174 +524,6 @@ void setting_item_clicked(void* context, uint32_t index) {
 void comm_thread_timer_callback(void* context) {
     App* app = (App*)context;
     furi_thread_flags_set(app->comm_thread_id, ThreadCommUpdData);
-}
-
-/**
- * @brief      Formats the text box string.
- * @details    This function is makes the json in the text box more readable
- * @param      message  The string to format
- * @param      text_box Pointer to the TextBox object
-*/
-void text_box_format_msg(App* app, const char* message, TextBox* text_box) {
-    if(text_box == NULL) {
-        FURI_LOG_E(TAG, "Invalid pointer to TextBox");
-        return;
-    }
-
-    if(message == NULL) {
-        FURI_LOG_E(TAG, "Invalid pointer to message");
-        return;
-    }
-
-    text_box_reset(text_box);
-
-    uint32_t message_length = strlen(message); // Length of the message
-    if(message_length > 0) {
-        uint32_t i = 0; // Index tracker
-        uint32_t formatted_index = 0; // Tracker for where we are in the formatted message
-        if(app->formatted_message != NULL) {
-            free(app->formatted_message);
-            app->formatted_message = NULL;
-        }
-
-        if(!easy_flipper_set_buffer(&app->formatted_message, (message_length * 5))) {
-            return;
-        }
-
-        while(i < message_length) {
-            uint32_t max_line_length = 31; // Maximum characters per line
-            uint32_t remaining_length = message_length - i; // Remaining characters
-            uint32_t line_length = (remaining_length < max_line_length) ? remaining_length :
-                                                                          max_line_length;
-
-            // Check for newline character within the current segment
-            uint32_t newline_pos = i;
-            bool found_newline = false;
-            for(; newline_pos < i + line_length && newline_pos < message_length; newline_pos++) {
-                if(message[newline_pos] == '\n') {
-                    found_newline = true;
-                    break;
-                }
-            }
-
-            if(found_newline) {
-                // If newline found, set line_length up to the newline
-                line_length = newline_pos - i;
-            }
-
-            // Temporary buffer to hold the current line
-            char line[32];
-            strncpy(line, message + i, line_length);
-            line[line_length] = '\0';
-
-            // Move the index forward by the determined line_length
-            if(!found_newline) {
-                i += line_length;
-
-                // Skip any spaces at the beginning of the next line
-                while(i < message_length && message[i] == ' ') {
-                    i++;
-                }
-            }
-            uint8_t indent_level = 0;
-            // Manually copy the fixed line into the formatted_message buffer, adding newlines where necessary
-            for(uint32_t j = 0; j < line_length; j++) {
-                switch(line[j]) {
-                case '{':
-                    app->formatted_message[formatted_index++] = line[j];
-                    app->formatted_message[formatted_index++] = '\n';
-                    indent_level++;
-                    for(size_t k = 0; k < indent_level; k++) {
-                        app->formatted_message[formatted_index++] = ' ';
-                    }
-
-                    break;
-                case ',':
-                    app->formatted_message[formatted_index++] = line[j];
-                    app->formatted_message[formatted_index++] = '\n';
-                    for(size_t k = 0; k < indent_level; k++) {
-                        app->formatted_message[formatted_index++] = ' ';
-                    }
-                    break;
-                case '}':
-                    app->formatted_message[formatted_index++] = '\n';
-                    for(size_t k = 1; k < indent_level; k++) {
-                        app->formatted_message[formatted_index++] = ' ';
-                    }
-                    indent_level--;
-                    app->formatted_message[formatted_index++] = line[j];
-                    break;
-                case '\"':
-                    break;
-                default:
-                    app->formatted_message[formatted_index++] = line[j];
-                    break;
-                }
-            }
-        }
-
-        // Null-terminate the formatted_message
-        app->formatted_message[formatted_index] = '\0';
-
-        // Add the formatted message to the text box
-        text_box_set_text(text_box, app->formatted_message);
-        text_box_set_focus(text_box, TextBoxFocusStart);
-    } else {
-        text_box_set_text(text_box, "No data in payload");
-    }
-}
-
-/**
- * @brief   Extract a string between the given delimiters
- * @param   string      char* where to search
-*  @param   dest        FuriString where to save the found string
- * @param   beginning   first delimiter
- * @param   ending      last delimiter
- * @return  true if the event was handled, false otherwise.
-*/
-void extract_payload(
-    const char* restrict string,
-    FuriString* dest,
-    const char* restrict beginning,
-    const char* restrict ending) {
-    //
-    char *start, *end;
-    char* temp;
-    temp = NULL;
-    bool failed = false;
-    start = strstr(string, beginning);
-    end = strstr(start, ending);
-    if(start && end) {
-        temp = (char*)malloc(end - start + 1);
-
-        if(start) {
-            start += strlen(beginning);
-            if(end) {
-                char* p = memccpy(temp, start, '\0', end - start);
-                if(!p) {
-                    temp[end - start] = '\0';
-                    FURI_LOG_I(
-                        TAG,
-                        "[extract_payload]: Manually temrinating string in [temp], check sizes");
-                }
-            } else {
-                failed = true;
-            }
-        } else {
-            failed = true;
-        }
-    } else {
-        failed = true;
-    }
-
-    if(!failed) {
-        furi_string_set_str(dest, temp);
-
-    } else {
-        furi_string_set_str(dest, "cannot extract payload");
-    }
-
-    free(temp);
 }
 
 /*
@@ -763,7 +549,7 @@ bool view_custom_event_callback(uint32_t event, void* context) {
     App* app = (App*)context;
     ReqModel* frame_model = view_get_model(app->view_frame);
     ReqModel* ha_model = view_get_model(app->view_ha);
-    //BtTest* bt_model = view_get_model(app->view_bt);
+    //    SghzTest* sghz_model = view_get_model(app->view_sghz);
 
     switch(event) {
     // Redraw the screen, called by the timer callback every timer tick
@@ -783,11 +569,6 @@ bool view_custom_event_callback(uint32_t event, void* context) {
         return true;
     case EventIdHaCheckBack:
         if(allow_back(ha_model) || true) {
-            view_dispatcher_switch_to_view(app->view_dispatcher, ViewSubmenu);
-        }
-        return true;
-    case EventIdBtCheckBack:
-        if(true) {
             view_dispatcher_switch_to_view(app->view_dispatcher, ViewSubmenu);
         }
         return true;
@@ -827,12 +608,15 @@ void view_timer_key_reset_callback(void* context) {
  * @param      _p  Input parameter - unused
  * @return     0 - Success
 */
-int32_t rest_remote_app(void* _p) {
+int32_t home_remote_app(void* _p) {
     UNUSED(_p);
+    furi_hal_random_init();
     furi_hal_gpio_init_simple(pin_wake, GpioModeOutputPushPull);
     furi_hal_gpio_write(pin_wake, true);
+    furi_delay_ms(100);
     App* app = app_alloc();
     view_dispatcher_run(app->view_dispatcher);
+
     app_free(app);
     furi_hal_gpio_write(pin_wake, false);
     furi_delay_ms(100);

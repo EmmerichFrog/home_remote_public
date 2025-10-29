@@ -1,14 +1,12 @@
 App(
-    appid="rest_remote",  # Must be unique
-    name="Rest Remote",  # Displayed in menus
+    appid="home_remote",  # Must be unique
+    name="Home Remote",  # Displayed in menus
     apptype=FlipperAppType.EXTERNAL,
-    entry_point="rest_remote_app",
+    entry_point="home_remote_app",
     stack_size=4 * 1024,
-    requires=[
-        "gui",
-    ],
+    requires=["bt", "gui"],
     order=10,
     fap_icon="app.png",
-    fap_category="GPIO",
+    fap_category="Misc",
     fap_icon_assets="assets",
 )

@@ -6,13 +6,14 @@
  * [License text continues...]
  */
 
+#include "libs/furi_utils.h"
 #include <libs/jsmn.h>
 #include <stdlib.h>
 #include <string.h>
 
 /**
- * Allocates a fresh unused token from the token pool.
- */
+  * Allocates a fresh unused token from the token pool.
+  */
 static jsmntok_t*
     jsmn_alloc_token(jsmn_parser* parser, jsmntok_t* tokens, const size_t num_tokens) {
     jsmntok_t* tok;
@@ -30,8 +31,8 @@ static jsmntok_t*
 }
 
 /**
- * Fills token type and boundaries.
- */
+  * Fills token type and boundaries.
+  */
 static void
     jsmn_fill_token(jsmntok_t* token, const jsmntype_t type, const int start, const int end) {
     token->type = type;
@@ -41,8 +42,8 @@ static void
 }
 
 /**
- * Fills next available token with JSON primitive.
- */
+  * Fills next available token with JSON primitive.
+  */
 static int jsmn_parse_primitive(
     jsmn_parser* parser,
     const char* js,
@@ -102,8 +103,8 @@ found:
 }
 
 /**
- * Fills next token with JSON string.
- */
+  * Fills next token with JSON string.
+  */
 static int jsmn_parse_string(
     jsmn_parser* parser,
     const char* js,
@@ -179,8 +180,8 @@ static int jsmn_parse_string(
 }
 
 /**
- * Create JSON parser over an array of tokens
- */
+  * Create JSON parser over an array of tokens
+  */
 void jsmn_init(jsmn_parser* parser) {
     parser->pos = 0;
     parser->toknext = 0;
@@ -188,8 +189,8 @@ void jsmn_init(jsmn_parser* parser) {
 }
 
 /**
- * Parse JSON string and fill tokens.
- */
+  * Parse JSON string and fill tokens.
+  */
 int jsmn_parse(
     jsmn_parser* parser,
     const char* js,
@@ -383,7 +384,7 @@ int jsmn_parse(
 // Helper function to create a JSON object
 char* jsmn(const char* key, const char* value) {
     int length = strlen(key) + strlen(value) + 8; // Calculate required length
-    char* result = (char*)malloc(length * sizeof(char)); // Allocate memory
+    char* result = malloc(length * sizeof(char)); // Allocate memory
     if(result == NULL) {
         return NULL; // Handle memory allocation failure
     }
@@ -400,7 +401,8 @@ int jsoneq(const char* json, jsmntok_t* tok, const char* s) {
     return -1;
 }
 
-// Return the value of the key in the JSON data
+// Return the value of the key in the JSON data -
+// 26/02/2025 - updated by EmmeFrog
 char* get_json_value(const char* restrict key, const char* restrict json_data, uint32_t max_tokens) {
     // Parse the JSON feed
     if(json_data != NULL) {
@@ -433,21 +435,15 @@ char* get_json_value(const char* restrict key, const char* restrict json_data, u
         for(int i = 1; i < ret; i++) {
             if(jsoneq(json_data, &tokens[i], key) == 0) {
                 // We found the key. Now, return the associated value.
-                int length = tokens[i + 1].end - tokens[i + 1].start;
+                size_t length = tokens[i + 1].end - tokens[i + 1].start;
                 char* value = malloc(length + 1);
                 if(value == NULL) {
                     FURI_LOG_E("JSMM.H", "Failed to allocate memory for value.");
                     free(tokens);
                     return NULL;
                 }
-                char* p = memccpy(value, json_data + tokens[i + 1].start, '\0', length);
-                if(!p) {
-                    value[length] = '\0';
-                    FURI_LOG_W(
-                        "JSMM.H",
-                        "[get_json_value] Key: [%s] manually temrinating string in [value], check sizes if output is truncated",
-                        key);
-                }
+                futils_copy_str(
+                    value, json_data + tokens[i + 1].start, length + 1, "get_json_value", value);
                 free(tokens); // Free the token array
                 return value; // Return the extracted value
             }
@@ -668,4 +664,156 @@ char** get_json_array_values(char* key, char* json_data, uint32_t max_tokens, in
     free(tokens);
     free(array_str);
     return values;
+}
+
+// EmmeFrog helper functions
+/**
+  * @brief      Clean the json and copy to a string
+  * @param      json  FuriJson*
+  * @return     True on success
+ */
+bool furi_json_to_text(FuriJson* json) {
+    size_t size = strlen(furi_string_get_cstr(json->_json)) + 1;
+    json->to_text = realloc(json->to_text, size);
+    futils_copy_str(
+        json->to_text,
+        furi_string_get_cstr(json->_json),
+        size,
+        "furi_json_to_text",
+        "json->to_text");
+
+    char buffer[size];
+    futils_copy_str(buffer, json->to_text, size, "furi_json_to_text", "buffer");
+    // Removes the %s
+    int32_t ret = snprintf(json->to_text, size, buffer, "");
+    bool success = (ret > 0 && ret < (int32_t)size) ? true : false;
+    return success;
+}
+
+/**
+  * @brief      Allocate the FuriJson*
+  * @return     FuriJson*
+ */
+FuriJson* furi_json_alloc() {
+    FuriJson* json = malloc(sizeof(FuriJson));
+    json->_json = furi_string_alloc();
+    furi_string_set_str(json->_json, "{%s\n}");
+    size_t size = strlen(furi_string_get_cstr(json->_json)) + 1;
+    json->to_text = malloc(size);
+    futils_copy_str(
+        json->to_text, furi_string_get_cstr(json->_json), size, "furi_json_alloc", "json->to_text");
+    furi_json_to_text(json);
+    return json;
+}
+
+/**
+  * @brief      Free the FuriJson*
+  * @param      json  FuriJson*
+ */
+void furi_json_free(FuriJson* json) {
+    furi_string_free(json->_json);
+    free(json->to_text);
+    free(json);
+}
+
+/**
+  * @brief      Add Key:Value pair to the json
+  * @param      json  FuriJson*
+  * @param      key   const char*
+  * @param      value const char*
+  * @return     True on success
+ */
+bool furi_json_add_entry_s(FuriJson* json, const char* key, const char* value) {
+    bool success = false;
+    char json_entry_fmt[18];
+    // If == 0 we don't need the comma
+    if(json->entries == 0) {
+        const char json_entry_fmt_init[] = "\n\t\"%s\": \"%s\"%s";
+        futils_copy_str(
+            json_entry_fmt,
+            json_entry_fmt_init,
+            sizeof(json_entry_fmt_init),
+            "furi_json_add_entry_s",
+            "json_entry_fmt");
+    } else {
+        const char json_entry_fmt_init[] = ",\n\t\"%s\": \"%s\"%s";
+        futils_copy_str(
+            json_entry_fmt,
+            json_entry_fmt_init,
+            sizeof(json_entry_fmt_init),
+            "furi_json_add_entry_s",
+            "json_entry_fmt");
+    }
+
+    size_t tot_size = sizeof(json_entry_fmt) + strlen(key) + strlen(value) + 1;
+    char buffer[tot_size];
+    int32_t ret = snprintf(buffer, tot_size, json_entry_fmt, key, value, "%s");
+    if(ret > 0 && ret < (int32_t)tot_size) {
+        size_t size = strlen(furi_string_get_cstr(json->_json)) + 1;
+        char buffer2[size];
+        futils_copy_str(
+            buffer2, furi_string_get_cstr(json->_json), size, "furi_json_add_entry_s", "buffer2");
+        furi_string_printf(json->_json, buffer2, buffer);
+        json->entries++;
+        success = furi_json_to_text(json);
+    } else {
+        FURI_LOG_E(
+            FURI_JSON_TAG,
+            "[furi_json_add_entry_s] Key: [%s] Value: [%s] - failed to encode string.",
+            key,
+            value);
+    }
+    return success;
+}
+
+/**
+  * @brief      Add Key:Value pair to the json
+  * @param      json  FuriJson*
+  * @param      key   const char*
+  * @param      value uint32_t
+  * @return     True on success
+ */
+bool furi_json_add_entry_u(FuriJson* json, const char* key, uint32_t value) {
+    bool success = false;
+    char json_entry_fmt[18];
+    // If == 0 we don't need the comma
+    if(json->entries == 0) {
+        const char json_entry_fmt_init[] = "\n\t\"%s\": \"%lu\"%s";
+        futils_copy_str(
+            json_entry_fmt,
+            json_entry_fmt_init,
+            sizeof(json_entry_fmt_init),
+            "furi_json_add_entry_u",
+            "json_entry_fmt");
+    } else {
+        const char json_entry_fmt_init[] = ",\n\t\"%s\": \"%lu\"%s";
+        futils_copy_str(
+            json_entry_fmt,
+            json_entry_fmt_init,
+            sizeof(json_entry_fmt_init),
+            "furi_json_add_entry_u",
+            "json_entry_fmt");
+    }
+
+    size_t tot_size = sizeof(json_entry_fmt) + strlen(key) + snprintf(NULL, 0, "%lu", value) + 1;
+    char buffer[tot_size];
+    int32_t ret = snprintf(buffer, tot_size, json_entry_fmt, key, value, "%s");
+    if(ret > 0 && ret < (int32_t)tot_size) {
+        size_t size = strlen(furi_string_get_cstr(json->_json)) + 1;
+        char buffer2[size];
+        futils_copy_str(
+            buffer2, furi_string_get_cstr(json->_json), size, "furi_json_add_entry_u", "buffer2");
+
+        furi_string_printf(json->_json, buffer2, buffer);
+
+        json->entries++;
+        success = furi_json_to_text(json);
+    } else {
+        FURI_LOG_E(
+            FURI_JSON_TAG,
+            "[furi_json_add_entry_u] Key: [%s] Value: [%lu] - failed to encode string.",
+            key,
+            value);
+    }
+    return success;
 }

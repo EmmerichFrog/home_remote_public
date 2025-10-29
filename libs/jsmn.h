@@ -12,7 +12,7 @@
  *
  * [License text continues...]
  */
-
+#pragma once
 #ifndef JSMN_H
 #define JSMN_H
 
@@ -29,12 +29,12 @@ extern "C" {
 #endif
 
 /**
-     * JSON type identifier. Basic types are:
-     * 	o Object
-     * 	o Array
-     * 	o String
-     * 	o Other primitive: number, boolean (true/false) or null
-     */
+      * JSON type identifier. Basic types are:
+      * 	o Object
+      * 	o Array
+      * 	o String
+      * 	o Other primitive: number, boolean (true/false) or null
+      */
 typedef enum {
     JSMN_UNDEFINED = 0,
     JSMN_OBJECT = 1 << 0,
@@ -53,11 +53,11 @@ enum jsmnerr {
 };
 
 /**
-     * JSON token description.
-     * type		type (object, array, string etc.)
-     * start	start position in JSON data string
-     * end		end position in JSON data string
-     */
+      * JSON token description.
+      * type		type (object, array, string etc.)
+      * start	start position in JSON data string
+      * end		end position in JSON data string
+      */
 typedef struct {
     jsmntype_t type;
     int start;
@@ -69,9 +69,9 @@ typedef struct {
 } jsmntok_t;
 
 /**
-     * JSON parser. Contains an array of token blocks available. Also stores
-     * the string being parsed now and current position in that string.
-     */
+      * JSON parser. Contains an array of token blocks available. Also stores
+      * the string being parsed now and current position in that string.
+      */
 typedef struct {
     unsigned int pos; /* offset in the JSON string */
     unsigned int toknext; /* next token to allocate */
@@ -79,14 +79,14 @@ typedef struct {
 } jsmn_parser;
 
 /**
-     * Create JSON parser over an array of tokens
-     */
+      * Create JSON parser over an array of tokens
+      */
 JSMN_API void jsmn_init(jsmn_parser* parser);
 
 /**
-     * Run JSON parser. It parses a JSON data string into and array of tokens, each
-     * describing a single JSON object.
-     */
+      * Run JSON parser. It parses a JSON data string into and array of tokens, each
+      * describing a single JSON object.
+      */
 JSMN_API int jsmn_parse(
     jsmn_parser* parser,
     const char* js,
@@ -129,3 +129,24 @@ char* get_json_array_value(char* key, uint32_t index, char* json_data, uint32_t 
 // Revised get_json_array_values function with correct token skipping
 char** get_json_array_values(char* key, char* json_data, uint32_t max_tokens, int* num_values);
 #endif /* JB_JSMN_EDIT */
+
+// EmmeFrog helper functions
+#define FURI_JSON_TAG "FURI_JSON_TAG"
+
+#define furi_json_add_entry(json, key, value) \
+    _Generic(                                 \
+        value,                                \
+        const char*: furi_json_add_entry_s,   \
+        char*: furi_json_add_entry_s,         \
+        uint32_t: furi_json_add_entry_u)(json, key, value)
+
+typedef struct {
+    FuriString* _json;
+    char* to_text;
+    uint32_t entries;
+} FuriJson;
+
+FuriJson* furi_json_alloc();
+void furi_json_free(FuriJson* json);
+bool furi_json_add_entry_s(FuriJson* json, const char* key, const char* value);
+bool furi_json_add_entry_u(FuriJson* json, const char* key, uint32_t value);

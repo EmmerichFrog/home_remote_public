@@ -3,14 +3,14 @@
 // Author: JBlanked
 // File: flipper_http.c
 
-#include <libs/flipper_http.h> // change this to where flipper_http.h is located
+#include "libs/flipper_http.h" // change this to where flipper_http.h is located
 
-// Function to append received data to file
-// make sure to initialize the file path before calling this function
 char* get_last_response(FlipperHTTP* fhttp) {
     return fhttp->last_response;
 }
 
+// Function to append received data to file
+// make sure to initialize the file path before calling this function
 bool flipper_http_append_to_file(
     const void* data,
     size_t data_size,
@@ -1291,7 +1291,6 @@ void flipper_http_rx_callback(const char* line, void* context) {
             FURI_LOG_I(HTTP_TAG, "GET request completed.");
             // Stop the timer since we've completed the GET request
             furi_timer_stop(fhttp->get_timeout_timer);
-            buzz_vibration();
             fhttp->started_receiving_get = false;
             fhttp->just_started_get = false;
             fhttp->state = IDLE;
@@ -1360,7 +1359,6 @@ void flipper_http_rx_callback(const char* line, void* context) {
             FURI_LOG_I(HTTP_TAG, "POST request completed.");
             // Stop the timer since we've completed the POST request
             furi_timer_stop(fhttp->get_timeout_timer);
-            buzz_vibration();
             fhttp->started_receiving_post = false;
             fhttp->just_started_post = false;
             fhttp->state = IDLE;

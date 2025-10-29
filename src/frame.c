@@ -1,4 +1,5 @@
 #include "frame.h"
+#include "libs/furi_utils.h"
 
 static const char FRAME_PREV_PATH[] = "/prev";
 static const char FRAME_NEXT_PATH[] = "/next";
@@ -29,8 +30,7 @@ static void view_frame_timer_callback(void* context) {
  * @details    Prepare the timer_draw and reset get status.
  * @param      context  The context - App object.
 */
-void view_frame_enter_callback(void* context) {
-    uint32_t period = furi_ms_to_ticks(10U);
+void frame_enter_callback(void* context) {
     App* app = (App*)context;
     app->current_view = ViewFrame;
     ReqModel* frame_model = view_get_model(app->view_frame);
@@ -51,7 +51,7 @@ void view_frame_enter_callback(void* context) {
     app->timer_reset_key =
         furi_timer_alloc(view_timer_key_reset_callback, FuriTimerTypeOnce, context);
     frame_model->req_sts = false;
-    furi_timer_start(app->timer_draw, period);
+    furi_timer_start(app->timer_draw, furi_ms_to_ticks(DRAW_PERIOD));
 }
 
 /**
@@ -59,7 +59,7 @@ void view_frame_enter_callback(void* context) {
  * @details    Stop and free the timer and prepare the text box for the response
  * @param      context  The context - App object.
 */
-void view_frame_exit_callback(void* context) {
+void frame_exit_callback(void* context) {
     App* app = (App*)context;
     furi_timer_flush();
     furi_timer_stop(app->timer_draw);
@@ -70,7 +70,8 @@ void view_frame_exit_callback(void* context) {
     app->timer_reset_key = NULL;
 
     // Prepare textbox
-    text_box_format_msg(app, get_last_response(fhttp), app->text_box_resp);
+    futils_text_box_format_msg(
+        app->formatted_message, get_last_response(fhttp), app->text_box_resp);
 }
 
 /**
@@ -81,79 +82,81 @@ void view_frame_exit_callback(void* context) {
 */
 void frame_draw_callback(Canvas* canvas, void* model) {
     ReqModel* frame_model = (ReqModel*)model;
-    uint8_t dolphin_sts = 0;
-    uint8_t http_state = fhttp->state;
-    uint8_t resp_state = fhttp->curr_req_sts;
+    uint8_t dolphin_sts = DolphinIdle;
+    const uint8_t http_state = fhttp->state;
+    const uint8_t resp_state = fhttp->curr_req_sts;
 
-    FuriString* cmd = furi_string_alloc();
-    furi_string_set_str(cmd, furi_string_get_cstr(frame_model->curr_cmd));
     bool req_sts = frame_model->req_sts;
     // This mutex will stop the timer to run the function again, in case it's still not finished
-    furi_check(furi_mutex_acquire(frame_model->worker_mutex, FuriWaitForever) == FuriStatusOk);
+    if(furi_mutex_acquire(frame_model->worker_mutex, FuriWaitForever) == FuriStatusOk) {
+        canvas_set_bitmap_mode(canvas, true);
+        futils_draw_header(canvas, "Pi Frame Control", 1, 8);
+        FuriString* cmd = furi_string_alloc();
+        furi_string_set_str(cmd, furi_string_get_cstr(frame_model->curr_cmd));
 
-    canvas_set_bitmap_mode(canvas, true);
-    // Draw pressed or not grahic
-    if(frame_model->last_input == InputKeyDown) {
-        canvas_draw_icon(canvas, 87, 31, &I_down_hover);
-    } else {
-        canvas_draw_icon(canvas, 87, 31, &I_down);
+        // Draw pressed or not grahic
+        if(frame_model->last_input == InputKeyDown) {
+            canvas_draw_icon(canvas, 87, 33, &I_down_hover);
+        } else {
+            canvas_draw_icon(canvas, 87, 33, &I_down);
+        }
+
+        if(frame_model->last_input == InputKeyLeft) {
+            canvas_draw_icon(canvas, 67, 12, &I_left_hover);
+        } else {
+            canvas_draw_icon(canvas, 67, 12, &I_left);
+        }
+
+        if(frame_model->last_input == InputKeyOk) {
+            canvas_draw_icon(canvas, 87, 12, &I_ok_hover);
+        } else {
+            canvas_draw_icon(canvas, 87, 12, &I_ok);
+        }
+
+        if(frame_model->last_input == InputKeyRight) {
+            canvas_draw_icon(canvas, 107, 12, &I_right_hover);
+        } else {
+            canvas_draw_icon(canvas, 107, 12, &I_right);
+        }
+
+        if(!(frame_model->last_input == InputKeyUp)) {
+            canvas_draw_icon(canvas, 109, 60, &I_Pin_pointer_5x3);
+        }
+
+        canvas_draw_icon(canvas, 67, 34, &I_prev_text_19x5);
+        canvas_draw_icon(canvas, 108, 34, &I_next_text_19x6);
+        //canvas_draw_icon(canvas, 93, 1, &I_BLE_beacon_7x8);
+        canvas_draw_icon(canvas, 90, 53, &I_shuffle);
+        canvas_draw_icon(canvas, 115, 58, &I_off_text_12x5);
+
+        if(http_state == ISSUE && req_sts) {
+            dolphin_sts = DolphinIssue;
+        } else if((resp_state == PROCESSING_BUSY || req_sts) && resp_state != PROCESSING_DONE) {
+            dolphin_sts = DolphinSending;
+        } else if(resp_state == PROCESSING_DONE || (!req_sts && http_state == IDLE)) {
+            dolphin_sts = DolphinIdle;
+        }
+
+        switch(dolphin_sts) {
+        case DolphinIssue:
+            canvas_draw_icon(canvas, 0, 16, &I_dolph_cry_49x54);
+            canvas_draw_icon(canvas, 50, 45, &I_box);
+            canvas_draw_str(canvas, 52, 54, furi_string_get_cstr(cmd));
+            break;
+        case DolphinIdle:
+            canvas_draw_icon(canvas, -1, 16, &I_DolphinCommon);
+            canvas_draw_icon(canvas, 38, 21, &I_box);
+            canvas_draw_str(canvas, 40, 30, furi_string_get_cstr(cmd));
+            break;
+        case DolphinSending:
+            canvas_draw_icon(canvas, 0, 9, &I_NFC_dolphin_emulation_51x64);
+            break;
+        default:
+            break;
+        }
+        furi_string_free(cmd);
+        furi_check(furi_mutex_release(frame_model->worker_mutex) == FuriStatusOk);
     }
-
-    if(frame_model->last_input == InputKeyLeft) {
-        canvas_draw_icon(canvas, 67, 10, &I_left_hover);
-    } else {
-        canvas_draw_icon(canvas, 67, 10, &I_left);
-    }
-
-    if(frame_model->last_input == InputKeyOk) {
-        canvas_draw_icon(canvas, 87, 10, &I_ok_hover);
-    } else {
-        canvas_draw_icon(canvas, 87, 10, &I_ok);
-    }
-
-    if(frame_model->last_input == InputKeyRight) {
-        canvas_draw_icon(canvas, 107, 10, &I_right_hover);
-    } else {
-        canvas_draw_icon(canvas, 107, 10, &I_right);
-    }
-
-    if(!frame_model->last_input == InputKeyUp) {
-        canvas_draw_icon(canvas, 109, 59, &I_Pin_pointer_5x3);
-    }
-
-    canvas_draw_icon(canvas, 107, 4, &I_next_text_19x6);
-    canvas_draw_icon(canvas, 67, 4, &I_prev_text_19x5);
-    canvas_draw_icon(canvas, 93, 1, &I_BLE_beacon_7x8);
-    canvas_draw_icon(canvas, 90, 52, &I_shuffle);
-    canvas_draw_icon(canvas, 115, 58, &I_off_text_12x5);
-
-    if(http_state == ISSUE && req_sts) {
-        dolphin_sts = 0;
-    } else if((resp_state == PROCESSING_BUSY || req_sts) && resp_state != PROCESSING_DONE) {
-        dolphin_sts = 2;
-    } else if(resp_state == PROCESSING_DONE || (!req_sts && http_state == IDLE)) {
-        dolphin_sts = 1;
-    }
-
-    switch(dolphin_sts) {
-    case 0:
-        canvas_draw_icon(canvas, 0, 16, &I_dolph_cry_49x54);
-        canvas_draw_icon(canvas, 50, 35, &I_box);
-        canvas_draw_str(canvas, 52, 44, furi_string_get_cstr(cmd));
-        break;
-    case 1:
-        canvas_draw_icon(canvas, -1, 16, &I_DolphinCommon);
-        canvas_draw_icon(canvas, 38, 21, &I_box);
-        canvas_draw_str(canvas, 40, 30, furi_string_get_cstr(cmd));
-        break;
-    case 2:
-        canvas_draw_icon(canvas, 0, 9, &I_NFC_dolphin_emulation_51x64);
-        break;
-    default:
-        break;
-    }
-    furi_check(furi_mutex_release(frame_model->worker_mutex) == FuriStatusOk);
-    furi_string_free(cmd);
 }
 
 /**
@@ -170,8 +173,7 @@ bool frame_input_callback(InputEvent* event, void* context) {
     if(event->key == InputKeyOk || event->key == InputKeyLeft || event->key == InputKeyRight ||
        event->key == InputKeyUp || event->key == InputKeyDown) {
         if(frame_model->last_input == event->key || frame_model->last_input == INPUT_RESET) {
-            uint32_t period = furi_ms_to_ticks(200);
-            furi_timer_restart(app->timer_reset_key, period);
+            furi_timer_restart(app->timer_reset_key, furi_ms_to_ticks(RESET_KEY_PERIOD));
         } else {
             furi_timer_stop(app->timer_reset_key);
             frame_model->last_input = INPUT_RESET;
@@ -216,6 +218,7 @@ bool frame_input_callback(InputEvent* event, void* context) {
         default:
             return false;
         }
+        view_dispatcher_send_custom_event(app->view_dispatcher, EventIdFrameRedrawScreen);
         return true;
     } else if(event->type == InputTypeLong) {
         switch(event->key) {
