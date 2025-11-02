@@ -13,18 +13,35 @@ static uint16_t bt_serial_callback(SerialServiceEvent event, void* ctx) {
             sizeof(DataStruct),
             (char*)event.data.buffer);
 
-        notification_message(app->notification, &sequence_blink_blue_10);
-
         if(event.data.size == sizeof(DataStruct)) {
             memcpy(&ha_model->bt_serial->data, event.data.buffer, sizeof(DataStruct));
             ha_model->bt_serial->bt_state = BtStateRecieving;
             ha_model->bt_serial->last_packet = furi_hal_rtc_get_timestamp();
-
             notification_message(app->notification, &sequence_blink_blue_10);
         }
     }
 
     return 0;
+}
+
+void bt_serial_write(App* app, BtSerialCmd cmd, char entity[3]) {
+    ReqModel* ha_model = view_get_model(app->view_ha);
+    entity[2] = '\0';
+    char buffer[32];
+
+    switch(cmd) {
+    case BtSerialCmdToggle:
+        snprintf(buffer, sizeof(buffer), "%s:%s", entity, "toggle");
+        size_t len = strlen(buffer);
+
+        notification_message(app->notification, &sequence_blink_green_10);
+        ble_profile_serial_tx(ha_model->bt_serial->ble_serial_profile, (uint8_t*)buffer, len);
+        break;
+
+    default:
+        FURI_LOG_I(TAG, "BtSerialCmd not implemented: %u", cmd);
+        break;
+    }
 }
 
 bool init_bt_serial(App* app) {
