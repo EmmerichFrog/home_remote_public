@@ -11,7 +11,7 @@ The project is composed of:
 - A fork of jblanked FlipperHTTP Esp32 firmware, mostly to add the ability to automatically shutdown and turn on the Esp32 when the app is launched;
 - A python flask app [https://github.com/EmmerichFrog/ha_proxy], to act as a proxy between Home Assistant and the Flipper. This is not strictly necessary, but greatly simplifies json handling since the json response from HA is quite big for my setup (around 55kB); (needed for wifi backend)
 - An ESP32 firmware [https://github.com/EmmerichFrog/sghz_connector/tree/main] to receive data from HA and send it via Subghz; (needed for the sghz backend)
-- A python app to send the data from HA via BT serial (repo coming soon).
+- A python app to send the data from HA via BT serial [https://github.com/EmmerichFrog/ble_serial_connector].
 
 Also the code for the e-paper picture frame can be found in my other repository.
 
