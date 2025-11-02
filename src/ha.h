@@ -10,4 +10,4 @@ void ha_enter_callback(void* context);
 void ha_exit_callback(void* context);
 void ha_draw_callback(Canvas* canvas, void* model);
 bool ha_input_callback(InputEvent* event, void* context);
-int32_t ha_comm_worker(void* context);
+int32_t ha_http_worker(void* context);

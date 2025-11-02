@@ -104,11 +104,7 @@ void ha_enter_callback(void* context) {
                 furi_string_get_cstr(app->ha_ssid),
                 furi_string_get_cstr(app->ha_pass));
         }
-        app->comm_thread = furi_thread_alloc();
-        furi_thread_set_name(app->comm_thread, "Comm_Thread");
-        furi_thread_set_stack_size(app->comm_thread, 2048);
-        furi_thread_set_context(app->comm_thread, app);
-        furi_thread_set_callback(app->comm_thread, ha_comm_worker);
+        app->comm_thread = furi_thread_alloc_ex("Comm_Thread", 2048, ha_http_worker, app);
         furi_thread_start(app->comm_thread);
         FURI_LOG_I(TAG, "Comm. thread started with period [%u]ms", ha_model->polling_rate);
         app->comm_thread_id = furi_thread_get_id(app->comm_thread);
@@ -121,30 +117,7 @@ void ha_enter_callback(void* context) {
     } break;
 
     case HaCtrlSghzBtHome:
-        // Beacon Setup
-        ha_model->ble->config.min_adv_interval_ms = ha_model->ble->beacon_period;
-        ha_model->ble->config.max_adv_interval_ms = ha_model->ble->beacon_period * 1.5;
-
-        const uint8_t fixed_mac[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-        if(false) {
-            randomize_mac(ha_model->ble->config.address);
-        } else {
-            memcpy(
-                ha_model->ble->config.address,
-                fixed_mac,
-                EXTRA_BEACON_MAC_ADDR_SIZE * sizeof(uint8_t));
-        }
-
-        pretty_print_mac(ha_model->ble->mac_address_str, ha_model->ble->config.address);
-        // The beacon expects the MAC address in reverse order
-        futils_reverse_array_uint8(ha_model->ble->config.address, EXTRA_BEACON_MAC_ADDR_SIZE);
-        ha_model->ble->timer_reset_beacon =
-            furi_timer_alloc(timer_beacon_reset_callback, FuriTimerTypeOnce, context);
-        app->comm_thread = furi_thread_alloc_ex("tx_beacon", 1024, bt_comm_worker, ha_model->ble);
-        furi_thread_start(app->comm_thread);
-        app->comm_thread_id = furi_thread_get_id(app->comm_thread);
-        // Beacon Setup End
-
+        ha_init_ble(app);
         // Subghz Setup
         ha_model->sghz->status = SGHZ_INIT;
         ha_model->sghz->last_message = furi_string_alloc();
@@ -221,16 +194,7 @@ void ha_exit_callback(void* context) {
         break;
 
     case HaCtrlSghzBtHome:
-        // Ble Cleanup
-        furi_timer_stop(ha_model->ble->timer_reset_beacon);
-        furi_timer_free(ha_model->ble->timer_reset_beacon);
-        ha_model->ble->timer_reset_beacon = NULL;
-        // Stop thread and wait for exit
-        if(app->comm_thread) {
-            furi_thread_flags_set(app->comm_thread_id, ThreadCommStop);
-            furi_thread_join(app->comm_thread);
-            furi_thread_free(app->comm_thread);
-        }
+        ha_deinit_ble(app);
         // Subghz Cleanup
         // Stop thread and wait for exit
         if(ha_model->sghz->rx_thread) {
@@ -278,8 +242,7 @@ void ha_draw_callback(Canvas* canvas, void* model) {
     const uint8_t resp_state = fhttp->curr_req_sts;
     //bool req_sts = ha_model->req_sts;
     // This mutex will stop the timer to run the function again, in case it's still not finished
-
-    if(furi_mutex_acquire(ha_model->worker_mutex, FuriWaitForever) == FuriStatusOk) {
+    if(furi_mutex_acquire(ha_model->worker_mutex, 0) == FuriStatusOk) {
         if((ha_model->control_mode == HaCtrlWifi && resp_state == PROCESSING_DONE &&
             http_state == IDLE && !ha_model->populated) ||
            (ha_model->control_mode == HaCtrlSghzBtHome &&
@@ -298,7 +261,6 @@ void ha_draw_callback(Canvas* canvas, void* model) {
         switch(ha_model->curr_page) {
         case PageFirst:
             futils_draw_header(canvas, "Bedroom", ha_model->curr_page, 8);
-
             canvas_draw_icon(canvas, 123, 2, &I_ButtonRightSmall_3x5);
 
             canvas_draw_icon(canvas, 0, 11, &I_weather_temperature);
@@ -416,6 +378,9 @@ bool ha_input_callback(InputEvent* event, void* context) {
                 } else if(ha_model->control_mode == HaCtrlSghzBtHome) {
                     ha_model->ble->event_type = BTHomeShortPress;
                     furi_thread_flags_set(app->comm_thread_id, ThreadCommSendCmd);
+                } else if(ha_model->control_mode == HaCtrlBtSerial) {
+                    char entity[3] = "dh";
+                    bt_serial_write(app, BtSerialCmdToggle, entity);
                 }
             }
             break;
@@ -439,6 +404,9 @@ bool ha_input_callback(InputEvent* event, void* context) {
                 } else if(ha_model->control_mode == HaCtrlSghzBtHome) {
                     ha_model->ble->event_type = BTHomeLongPress;
                     furi_thread_flags_set(app->comm_thread_id, ThreadCommSendCmd);
+                } else if(ha_model->control_mode == HaCtrlBtSerial) {
+                    char entity[3] = "ad";
+                    bt_serial_write(app, BtSerialCmdToggle, entity);
                 }
             }
 
@@ -455,7 +423,7 @@ bool ha_input_callback(InputEvent* event, void* context) {
     return false;
 }
 
-int32_t ha_comm_worker(void* context) {
+int32_t ha_http_worker(void* context) {
     App* app = context;
     ReqModel* ha_model = view_get_model(app->view_ha);
 
@@ -469,14 +437,6 @@ int32_t ha_comm_worker(void* context) {
         if(events & ThreadCommStop) {
             run = false;
             FURI_LOG_I(TAG, "Thread event: Stop command request");
-
-        } else if(events & ThreadCommStopCmd) {
-            ha_model->ble->status = BEACON_INACTIVE;
-            FURI_LOG_I(BT_TAG, "Resetting Beacon...");
-            if(furi_hal_bt_extra_beacon_is_active()) {
-                furi_check(furi_hal_bt_extra_beacon_stop());
-            }
-            FURI_LOG_I(BT_TAG, "Resetting Beacon done.");
         } else if(events & ThreadCommSendCmd) {
             FURI_LOG_I(TAG, "Thread event: Send command");
             while(!allow_cmd(ha_model)) {

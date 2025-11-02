@@ -1,4 +1,5 @@
 #include "ha_helpers.h"
+#include "ble_beacon.h"
 
 static const char HA_BEDROOM_TEMP_KEY[] = "bt";
 static const char HA_BEDROOM_HUM_KEY[] = "bh";
@@ -191,4 +192,42 @@ void parse_ha_bt_serial(DataStruct* data, ReqModel* ha_model) {
     furi_string_set_str(ha_model->print_co2, temp_str);
     snprintf(temp_str, sizeof(temp_str), "%u", data->pm2_5);
     furi_string_set_str(ha_model->print_pm2_5, temp_str);
+}
+
+void ha_init_ble(App* app) {
+    ReqModel* ha_model = view_get_model(app->view_ha);
+    ha_model->ble->config.min_adv_interval_ms = ha_model->ble->beacon_period;
+    ha_model->ble->config.max_adv_interval_ms = ha_model->ble->beacon_period * 1.5;
+
+    const uint8_t fixed_mac[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+    if(false) {
+        randomize_mac(ha_model->ble->config.address);
+    } else {
+        memcpy(
+            ha_model->ble->config.address,
+            fixed_mac,
+            EXTRA_BEACON_MAC_ADDR_SIZE * sizeof(uint8_t));
+    }
+
+    pretty_print_mac(ha_model->ble->mac_address_str, ha_model->ble->config.address);
+    // The beacon expects the MAC address in reverse order
+    futils_reverse_array_uint8(ha_model->ble->config.address, EXTRA_BEACON_MAC_ADDR_SIZE);
+    ha_model->ble->timer_reset_beacon =
+        furi_timer_alloc(timer_beacon_reset_callback, FuriTimerTypeOnce, app);
+    app->comm_thread = furi_thread_alloc_ex("tx_beacon", 1024, bt_comm_worker, ha_model->ble);
+    furi_thread_start(app->comm_thread);
+    app->comm_thread_id = furi_thread_get_id(app->comm_thread);
+}
+
+void ha_deinit_ble(App* app) {
+    ReqModel* ha_model = view_get_model(app->view_ha);
+    furi_timer_stop(ha_model->ble->timer_reset_beacon);
+    furi_timer_free(ha_model->ble->timer_reset_beacon);
+    ha_model->ble->timer_reset_beacon = NULL;
+    // Stop thread and wait for exit
+    if(app->comm_thread) {
+        furi_thread_flags_set(app->comm_thread_id, ThreadCommStop);
+        furi_thread_join(app->comm_thread);
+        furi_thread_free(app->comm_thread);
+    }
 }
