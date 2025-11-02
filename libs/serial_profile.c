@@ -56,7 +56,7 @@ static const GapConfig serial_template_config = {
         },
     .appearance_char = 0x8600,
     .bonding_mode = true,
-    .pairing_method = GapPairingPinCodeShow,
+    .pairing_method = GapPairingPinCodeVerifyYesNo,
     .conn_param = {
         .conn_int_min = CONNECTION_INTERVAL_MIN,
         .conn_int_max = CONNECTION_INTERVAL_MAX,
